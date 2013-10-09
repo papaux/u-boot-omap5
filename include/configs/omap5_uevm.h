@@ -53,6 +53,28 @@
 #define CONFIG_PARTITION_UUIDS
 #define CONFIG_CMD_PART
 
+/* USB UHH support options */
+#define CONFIG_CMD_USB
+#define CONFIG_USB_HOST
+#define CONFIG_USB_EHCI
+#define CONFIG_USB_EHCI_OMAP
+#define CONFIG_USB_STORAGE
+#define CONFIG_SYS_USB_EHCI_MAX_ROOT_PORTS 3
+#define CONFIG_EHCI_HCD_INIT_AFTER_RESET
+
+#define CONFIG_OMAP_EHCI_PHY2_RESET_GPIO 80
+#define CONFIG_OMAP_EHCI_PHY3_RESET_GPIO 79
+
+/* Enabled commands */
+#define CONFIG_NET_MULTI
+#define CONFIG_CMD_DHCP		/* DHCP Support			*/
+#define CONFIG_CMD_NET		/* bootp, tftpboot, rarpboot	*/
+#define CONFIG_CMD_NFS		/* NFS support			*/
+
+/* USB Networking options */
+#define CONFIG_USB_HOST_ETHER
+#define CONFIG_USB_ETHER_SMSC95XX
+
 #define CONFIG_SYS_PROMPT		"OMAP5432 uEVM # "
 
 #define CONSOLEDEV		"ttyO2"
