@@ -8,7 +8,8 @@
  * Marius Groeger <mgroeger@sysgo.de>
  *
  * Copyright (C) 2001  Erik Mouw (J.A.K.Mouw@its.tudelft.nl)
- *
+ * HYP entry (c) 2012  Ian Molton <ian.molton at codethink.co.uk>
+ *                and  Clemens Fischer <clemens.fischer at h-da.de>
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -33,6 +34,42 @@
 #include <fdt_support.h>
 #include <asm/bootm.h>
 #include <linux/compiler.h>
+
+/* A small stack to allow us to safely call the OMAP5 monitor API, in order to
+ * enable HYP mode. This must be accessible in HYP mode.
+ */
+unsigned int hyp_primary_stack[11];
+
+/*
+ * function called by cpu 1 after wakeup
+ */
+extern void __hyp_init_sec(void);
+
+asm (
+	".pushsection .text\n"
+	".global __hyp_init_sec\n"
+	"__hyp_init_sec:\n"
+		"ldr r12, =0x102\n"
+		"mov r0, pc\n"
+		"smc 0x1\n"
+		"ldr r1, =0x48281800\n" /* AUX_CORE_BOOT_0 */
+		"mov r2, #0\n"
+		"str r2, [r1]\n"	/* AUX_CORE_BOOT_0 */
+		"str r2, [r1, #4]\n"	/* AUX_CORE_BOOT_1 */
+		"isb\n"
+		"dsb\n"
+		"mov r3, #0xf0\n"
+		"1: wfe\n"
+		"ldr  r2, [r1]\n"	/* AUX_CORE_BOOT_0 */
+		"ands r2, r2, r3\n"
+		"beq  1b\n"
+		"ldr  r2, [r1, #4]\n"	/* AUX_CORE_BOOT_1 */
+		"cmp  r2, #0\n"
+		"beq  1b\n"
+		"bx   r2\n"
+	".popsection\n"
+);
+
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -91,6 +128,46 @@ static void announce_and_cleanup(int fake)
 #endif
 	cleanup_before_linux();
 }
+
+/*
+ * Enable HYP mode on the OMAP5 CPU
+ *
+ * FIXME: this needs to test to make sure its running on an OMAP5
+ *
+ * We wake up CPU1 at __hyp_init_sec which allows us to put it into HYP
+ * mode.
+ *
+ * CPU1 then clears AUX_CORE_BOOT_0 and enters WFE, until the kernel wakes it.
+ *
+ * In order to avoid CPU1 continuing execution on just about any event, we
+ * wait for AUX_CORE_BOOT_0 to contain a non-zero address, at which point
+ * we continue execution at that address.
+ *
+ */
+
+void hyp_enable(void) {
+	 /*Wake up CPU1 and enable HYP on CPU0. */
+	asm(
+		"ldr r1, =0x48281800\n"     // AUX_CORE_BOOT_1
+		"ldr r2, =__hyp_init_sec\n"
+		"str r2, [r1, #4]\n"
+		"mov r2, #0x20\n"
+		"str r2, [r1]\n"            // AUX_CORE_BOOT_0
+		"isb\n"
+		"dmb\n"
+		"dsb\n"
+		"sev\n"                     // Wake CPU1
+		"ldr r1,=hyp_primary_stack\n"
+		"ldr r12, =0x102\n"
+		"mov r0, pc\n"
+		"stm   r1, {r4-r14}\n"
+		"smc 0x1\n"                 // CPU0 -> HYP mode
+		"ldr r1,=hyp_primary_stack\n"
+		"ldm   r1, {r4-r14}\n"
+		:::"r0", "r1", "r2", "r3", "cc", "memory"
+	);
+};
+
 
 static void setup_start_tag (bd_t *bd)
 {
@@ -252,6 +329,8 @@ static void boot_jump_linux(bootm_headers_t *images, int flag)
 		"...\n", (ulong) kernel_entry);
 	bootstage_mark(BOOTSTAGE_ID_RUN_OS);
 	announce_and_cleanup(fake);
+
+	hyp_enable();
 
 	if (IMAGE_ENABLE_OF_LIBFDT && images->ft_len)
 		r2 = (unsigned long)images->ft_addr;
